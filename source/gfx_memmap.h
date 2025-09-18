@@ -2,16 +2,34 @@
 #define GFX_MEMMAP_H__
 
 /* Configuration section */
-//#define DO_POPULATE_OTABLE
+#define DO_POPULATE_OTABLE
 //#define DO_VLINE_PROTECTION
-#define DO_PERF_FEST
+#define DO_PERF_TEST
+#define DO_OPTIMIZED_RAYCASTING
+//#define DO_LARGE_DIST
+#define DO_LUT_TAN_MUL
+//#define DO_LUT_CTAN_MUL
 //#define DEBUG_LENGTH
 //#define DO_SND
-//DO_HIGH_CTAN_PRECISION
+//#define DO_HIGH_CTAN_PRECISION
+#define USE_STDLIB
 
-#define DTABLE_SEG          0xF6      /* F600...F7FF dtable */
-#define DTABLE_ADDR         0xF600
-#define d_table             ((uint8_t*) 0xF600)
+
+#define FAST_CTAN_MUL_SEG        0xBD
+#define FAST_CTAN_MUL_ADDR       0xBD00
+#define fmul_ctan_table          ((uint8_t*) FAST_CTAN_MUL_ADDR)
+#define _fmul_ctan_table         0xBD00
+
+
+
+#define FAST_MUL_SEG        0xDF
+#define FAST_MUL_ADDR       0xDF00
+#define fmul_table          ((uint16_t*) FAST_MUL_ADDR)
+#define _fmul_table         0xFD00
+
+#define DTABLE_SEG          0xF0      /* F000...F7FF dtable */
+#define DTABLE_ADDR         0xF000
+#define d_table             ((uint8_t*) DTABLE_ADDR)
 #define _d_table            DTABLE_ADDR
 
 
@@ -41,6 +59,7 @@
 #define YBUFO_ADDR          0xFB80    /* FB80...FB9F Old height rendered for column. Used for adaptive redraw */
 #define YBUFCO_ADDR         0xFBA0    /* FBA0...FBBF Old color rendered for column. Used for adaptive redraw */
 #define CDIV_ADDR           0xFBC0    /* FBC0...FBDF Used for interpolation */
+#define TMPBUF_ADDR         0xFBE0
 
 /* Mapping for C code */
 #define Ybuf                ((uint8_t*) YBUF_ADDR)
@@ -56,6 +75,8 @@
 #define _Ybuf_i YBUFI_ADDR
 #define _cdiv   CDIV_ADDR
 
+
+#define _bufa   TMPBUF_ADDR
 
                                     /* 0xFBE0...0xFBFF empty     */
 #define INTMAP_ADDR         0xFC00  /* 0xFC00...0xFD00 populated */

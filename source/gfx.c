@@ -3,24 +3,46 @@
  * To build:
  * 	zcc +zx -lm -lndos -create-app gfx.c
  */
+#include "gfx_memmap.h"
 
+#ifdef USE_STDLIB
 #include <graphics.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "gfx_memmap.h"
+#include <im2.h>
+
+#define mmemcpy memcpy
+
+#else
+
+#define uint8_t unsigned char
+#define int8_t char
+#define uint16_t unsigned short
+#define int16_t short
+
+void mmemcpy( void *to, void *from, uint16_t size)   { char *a=from, *b=to; while(size--) *(b++) = * (a++); }
+void memset( void *from, char value, uint16_t size) { char *a=from; while(size--) *(a++)=value; }
+
+
+#endif
+
+#include "gfx_render.h"
 #include "gfx_maps.c"
 #include "gfx_io.c"
 #include "div.c"
 #include "gfx_raycast.c"
 #include "gfx_math.c"
+#include "gfx_vector.c"
 
 
 
 uint8_t  itable[8*64];    // interpolation table
 uint16_t px=8*256,py=2*256-30;
 uint8_t  pa;
+uint16_t sprite_x=0x800, sprite_y=0x800, ghost=0;
+uint16_t fireball_x=0x800, fireball_y=0x800, fireball_vx=10, fireball_vy=0, fireball=0, cnt=0, gkill=0, gkill_addr;
 
 #define highbyte(n) (((uint8_t*)&n)[1])
 #define YADDR(y) ((((uint16_t) (( (y<<3)&56 ) | ( (y>>3)&7) | (y&192)))<<5)|16384)
@@ -35,7 +57,6 @@ uint16_t ltimes[NUM_LEVELS]= {65535,65535,65535,65535,65535,65535}, btime;
 #include "gfx_render.c"
 
 
-
 void mplot( uint8_t x, uint8_t y)
 {
     uint8_t *a = ytable[y] + (x>>3);
@@ -48,7 +69,7 @@ void calc_cdiv()
     for( uint8_t x=0; x<31; x++)
     {
         uint8_t a=Ybuf[x]-Ybuf[x+1];
-        if ((a<2)||(a>0xFE)) { /*printf("%c%c%c  ", 22, 32+23, 32+2*x); */cdiv[x]=2; continue; }
+        if ((a<2)||(a>0xFE)) { cdiv[x]=2; continue; }
 
         a=Ybuf_i[x];
         uint8_t b=Ybuf_i[x+1];
@@ -57,11 +78,11 @@ void calc_cdiv()
         switch(a)
         {
 
-            case 0x0 : b=0;   /*  printf("%c%c%c0 ", 22, 32+23, 32+2*x);  */ break;
-            case 0x1 : b=0;   /*  printf("%c%c%c1 ", 22, 32+23, 32+2*x);  */ break;
-            case 0xF : b=0;   /*  printf("%c%c%c1 ", 22, 32+23, 32+2*x);  */ break;
-            case 0x10: b=0;   /*  printf("%c%c%c1 ", 22, 32+23, 32+2*x);  */ break;
-            case 0xF0: b=0;   /*  printf("%c%c%c1 ", 22, 32+23, 32+2*x);  */ break;
+            case 0x0 : b=0;   break;
+            case 0x1 : b=0;   break;
+            case 0xF : b=0;   break;
+            case 0x10: b=0;   break;
+            case 0xF0: b=0;   break;
             default: 
               if ((!(a&0xF))||(!(a&0xF0)))
               {
@@ -92,7 +113,7 @@ void calc_cdiv()
 calc_cdiv_loop_start:
     ld a, (hl)  // b= Ybuf, c=Ybuf[+1]
     ld b, a
-    inc hl
+    inc l // l?
     ld a, (hl)
     sub b
     neg
@@ -102,12 +123,12 @@ calc_cdiv_loop_start:
     jr z, set_b2// calc_cdiv_loop_end // if (b-c<2) || (b-c>0xFE) continue
     exx
     ld a, (hl)
-    inc hl
+    inc l // l
     exx
     ld c, a
     exx
     ld a, (hl)
-    dec hl
+    dec hl //l
     exx 
     ld b, a
     ld a, c
@@ -263,10 +284,11 @@ calc_cdiv_update_loop_end:
 #define MIDDLE_LINE_INTERP (96+4)
 void bwrender3( )  
 {
+    uint8_t x;
     calc_cdiv();
     calc_cdiv_update();
 
-    for( uint8_t x=0; x<31; x++)
+    for( x=0; x<31; x++)
     {
         uint16_t y0, y1;
         if (cdiv[x]&1) // no update
@@ -280,7 +302,7 @@ void bwrender3( )
 
         if (cdiv[x]&2)   // plain mode - no interpolation
         {
-#if 1
+#if 0	
             if ( (x)&&((cdiv[x-1]&2)==0)&&(Ybuf_i[x-1]==Ybuf_i[x])&&(Ybuf_i[x+1]!=Ybuf_i[x]) ) // if previous had gradient & and the same as me
             {
                 y0=Ybuf[x];
@@ -312,9 +334,10 @@ continue_please:
                            interp_r =0x0;                         interp_y0 = MIDDLE_LINE_INTERP-y0;        interp_y1 = MIDDLE_LINE_INTERP-y1;        interp();
         } 
     }
+    x=31;
     vline_x = 31;
-    vline_d = vline_db= Ybuf[31];
-    vline_c = Ybuf_c[31];
+    vline_d = vline_db= Ybuf[x];
+    vline_c = Ybuf_c[x];
     vline3();
 }
 
@@ -334,6 +357,7 @@ void maprender()
 
     mplot( mx, my );
 }
+
 
 void snd()
 {
@@ -357,6 +381,7 @@ void snd()
 
 void game_end()
 {
+#ifdef USE_STDLIB
     printf("%c%c%c Ending screen of this demo. Technical details.\n\n", 22, 32+2, 32);
     printf("Raycasting is fully hand optimized. \nIt uses 8x8 map to store position in one byte.\n");
     printf("Player location is stored in 16 bit register, \nof which oldest 4 bits are not used\n");
@@ -366,6 +391,7 @@ void game_end()
     printf("For 32fps,32 rays = 1024 rays/second. \n");
     printf("  Roughly 3500 z80 cycles needed to draw one ray.\n  It is less than 1000 z80 instructions\n");
     printf("         Press U to return to start\n");
+#endif
     while( !(get_qweasdu()&0x64) );
 }
 
@@ -375,11 +401,17 @@ int16_t player_vx=0, player_vy=5;
 int8_t  player_ax, player_ay, player_rotation_v;
 int16_t tick=0;
 // game parameters
-uint8_t render_mode=0;
+uint8_t render_mode=1;
 uint8_t game_level=0;
 uint8_t game_counter=0;
 uint8_t fast_tick, border;
 uint8_t r2;
+
+void raise_ghost()
+{
+    printf("%c%c%c Ghost appear! Y shoots the fireball! ", 22, 32+23, 32);
+    ghost = 1;
+}
 
 void level_end()
 {
@@ -387,38 +419,51 @@ void level_end()
     if (btime<ltimes[game_level]) ltimes[game_level]=btime;
     btime = get_clock();
     player_vx=player_ax=player_vy=player_ay=0; px=8*256-30,py=2*256-30; game_level++; player_rotation_v=12;
-    if (game_level>4) game_level=0;
+    if (game_level>5) game_level=0;
     switch(game_level)
     {
-        case 4: memcpy( bmap, bmap5, 256); pa = 192; break;
-        case 3: memcpy( bmap, bmap4, 256); pa = 192; break;
-        case 2: memcpy( bmap, bmap3, 256); pa = 192; break;
-        case 1: memcpy( bmap, bmap1, 256); pa = 192; break;
-        case 0: memcpy( bmap, bmap2, 256); break;
+        case 6: mmemcpy( bmap, bmap7, 256); pa = 192;                break;
+        case 5: mmemcpy( bmap, bmap6, 256); pa = 192;  printf("%c%c%c Neons! Neons everywhere!!! All around neons!!", 22, 32+12, 32); break;
+        case 4: mmemcpy( bmap, bmap5, 256); pa = 192; render_mode=1; break;
+        case 3: mmemcpy( bmap, bmap4, 256); pa = 192; render_mode=2; break;
+        case 2: mmemcpy( bmap, bmap3, 256); pa = 192; break;
+        case 1: mmemcpy( bmap, bmap1, 256); pa = 192; raise_ghost(); break;
+        case 0: mmemcpy( bmap, bmap2, 256); break;
     }
     if (game_level)
-        printf("%c%c%c Congrats! you have achieved level%c!                     ", 22, 32+23, 32, game_level+'1');
+    {
+#ifdef USE_STDLIB
+        if (game_level!=1) printf("%c%c%c Congrats! you have achieved level%c!                     ", 22, 32+23, 32, game_level+'1');
+#endif
+    }
     else
     {
-        switch( game_counter++ )
+        game_counter++;
+        if (game_counter==5) { game_end(); game_counter=0; }
+#ifdef USE_STDLIB
+        switch( game_counter )
         {
-            default: game_counter=0;
+            default: 
             case 0: printf("%c%c%c End of levels! PSST! use U to change rendering mode. ", 22, 32+23, 32); break;
             case 1: printf("%c%c%c Do you know that pressing Y turns speed boost?!      ", 22, 32+23, 32); break;
             case 2: printf("%c%c%c Did you know that robot is afraid of speed boost?    ", 22, 32+23, 32); break;
             case 3: printf("%c%c%c Pressing Y+U simultaneously will start perf test     ", 22, 32+23, 32); break;
             case 4: printf("%c%c%c I am impressed! You are still playing it!            ", 22, 32+23, 32); break;
-            case 5: game_end(); break;
+            case 5: break;
         }
+#endif
     }
 
+#ifdef USE_STDLIB
     printf("%c%c%c Level times: %u %u %u %u %u %u       ", 22, 32, 32, ltimes[0], ltimes[1], ltimes[2], ltimes[3], ltimes[4], ltimes[5]);
+#endif
 }
 
 void render_mode_change()
 {
     render_mode++; render_mode%=4;
-    memset( 16384+2048+4096, 56, 768 ); 
+    memset( (void*) (16384+2048+4096), 56, 768 ); 
+#ifdef USE_STDLIB
     printf("%c%c%c Renderer mode: %c-", 22, 32+23, 32, render_mode+'0'); 
     switch( render_mode )
     {
@@ -427,6 +472,7 @@ void render_mode_change()
         case 2: printf("precise renderer  "); break;
         case 3: printf("map renderer      "); break;
     }
+#endif
     for( uint8_t y = 16; y<176; y++)
         memset( (void*) (ytable[y]), 0, 32 );
 
@@ -436,12 +482,12 @@ void render_mode_change()
 }
 
 
+
 void player()
 {
-    uint8_t k;
-
-    k = get_qweasdu();
     player_ax=player_ay=r2=0;
+    if ((get_qweasdu_result&64) && (!(old_player_k&64))) render_mode_change();
+    old_player_k=get_qweasdu_result;
 
 #asm
 //    if (k&2)  { player_ay=-sin_table[(pa+64)&255]>>3; player_ax = sin_table[pa]>>3;  }
@@ -526,9 +572,8 @@ kskip6:
 #endasm
 
 
-    if ((k&64) && (!(old_player_k&64))) render_mode_change();
 
-    if (k&128) { // fire => turbo mode!
+    if (get_qweasdu_result&128) { // fire => turbo mode!
         snd();
         player_vx+=player_ax>>1;        player_vy+=player_ay>>1; 
         player_vx-=player_vx>>4;        player_vy-=player_vy>>4;
@@ -541,6 +586,9 @@ kskip6:
     else
     {
 #asm
+//        player_vx-=player_vx>>3;         player_vx+=player_ax>>1; if (player_vx>0) player_vx--; else if (player_vx<0) player_vx++;
+//        player_vy-=player_vy>>3;        player_vy+=player_ay>>1;  
+  //     if (player_vy>0) player_vy--; else if (player_vy<0) player_vy++;
 
 
     ld   hl, (_player_vx)      // HL = vx
@@ -610,11 +658,8 @@ StoreVY:
 #endasm
 
         
-//        player_vx-=player_vx>>3;         player_vx+=player_ax>>1; if (player_vx>0) player_vx--; else if (player_vx<0) player_vx++;
-//        player_vy-=player_vy>>3;        player_vy+=player_ay>>1;  
-  //     if (player_vy>0) player_vy--; else if (player_vy<0) player_vy++;
     }
-    old_player_k=k;
+    
 #if 1
 #asm
 //    px+=player_vx>>2; r=bmap[ ((highbyte(py)&15)<<4)|(highbyte(px)&15) ]; if ((r)&&(r!=0xFF)) {px-=player_vx; player_vx=-player_vx>>1; r2=r;  }
@@ -643,9 +688,9 @@ StoreVY:
     ld h, BMAP_SEG
     ld a, (hl)
     or a
-    jz vx_move_ok
+    jr z, vx_move_ok
     cp 0xFF
-    jz vx_move_ok
+    jr z, vx_move_ok
 
     ld (_r2), a
 
@@ -688,9 +733,9 @@ after_vx:
     ld h, BMAP_SEG
     ld a, (hl)
     or a
-    jz vy_move_ok
+    jr z, vy_move_ok
     cp 0xFF
-    jz vy_move_ok
+    jr z, vy_move_ok
 
     ld (_r2), a
 
@@ -753,203 +798,31 @@ done:
 
 #endasm
 
+    
+
     if (r2==0x48)
     {
          level_end();
     } else { 
-         border=( r2?r2: (k&128?tick:7) );  
+         border=( r2?r2: (get_qweasdu_result&128?tick:7) );  
+#ifdef USE_STDLIB
          zx_border(border);
-    }
-
-}
-
-
-char* perf_test_helper( char* s, uint16_t x, uint16_t d)
-{
-    static char buf[32];
-    uint32_t fps = 256*5000; fps/=x;
-
-    printf("  %s %u  FPS: %u.%2u Delta: %u\n", s, x,  (uint16_t)(fps/100), (uint16_t)(fps%100), x-d);
-    return buf;
-}
-
-#if 0
-void wait_clock()
-{
-    uint8_t t = get_clock();
-    while( t==get_clock() );
-    t = get_clock();
-    while( t==get_clock() );
-    printf("%c%c%c %u.\n", 22, 32+21, 32, t);
-}
 #endif
-
-#ifdef DO_PERF_FEST
-void perf_test()
-{
-    uint16_t start, end;
-    start = get_clock();
-
-    uint16_t pegs[8];
-
-    printf("%c%c%c Doing performance test. Stay tuned.\n", 22, 32+22, 32);
-
-    for( interp_c=1; interp_c<8; interp_c++)
-    {
-        interp_xx=0xFF; interp_r =0;  
-        for( uint8_t i=0; i<32; i++) {        interp_x = i;        interp_y0 = 4;        interp_y1 = 5+i;        interp();    }
-
-        interp_xx=0;
-        for( uint8_t i=0; i<32; i++) {        interp_x = i;        interp_y0 = 4+32;     interp_y1 = 5+i+32;     interp();    }
-
-        interp_xx=0; interp_r =0xFF;
-        for( uint8_t i=0; i<32; i++) {        interp_x = i;        interp_y0 = 4+64;     interp_y1 = 5+i+64;        interp();   }
-
-        interp_xx=0xFF;
-        for( uint8_t i=0; i<32; i++) {        interp_x = i;        interp_y0 = 4+92;     interp_y1 = 5+i+16+92;     interp();    }
     }
-    pegs[0] = get_clock()-start;
-
-    start = get_clock();
-    for( pa=0; pa<255; pa++) {
-        raycast2(); 
-    }
-    pegs[1] = get_clock()-start;
-
-    start = get_clock();
-    for( pa=0; pa<255; pa++) {
-        raycast2(); 
-        calc_cdiv();
-        calc_cdiv_update();
-
-    }
-    pegs[2] = get_clock()-start;
-
-
-    start = get_clock();
-    for( pa=0; pa<255; pa++) {
-        raycast2(); renderv();
-    }
-    pegs[3] = get_clock()-start;
-
-    start = get_clock();
-    for( pa=0; pa<255; pa++) {
-        player(); raycast2(); renderv();
-    }
-    pegs[4] = get_clock()-start;
-
-
-    start = get_clock();
-    for( pa=0; pa<255; pa++) {
-        raycast2(); bwrender3();
-    }
-    pegs[5] = get_clock()-start;
-
-    clg(); 
-    printf("%c%c%cPerformance test result: \n", 22, 32, 32);
-    printf("  Triangles:      %d \n", pegs[0]);
-    perf_test_helper("Raycast:       ",pegs[1],0);
-    perf_test_helper("Raycast+cdiv:  ",pegs[2],pegs[1]);
-    perf_test_helper("RenderV:       ",pegs[3],pegs[1]);
-    perf_test_helper("RenderV+player:",pegs[4],pegs[3]);
-    perf_test_helper("BWrender3:     ",pegs[5],pegs[2]);
-    printf("Compilation flags:\n");
-#ifdef DO_POPULATE_OTABLE
-    printf("  DO_POPULATE_OTABLE\n");
-#endif
-#ifdef DEBUG_LENGTH
-    printf("  DEBUG_LENGTH\n");
-#endif
-//#ifdef USE_STACK
-//    printf("  USE_STACK\n");
-//#endif
-
-    printf("  Build time: " __DATE__ " "__TIME__ "\n");
-
-    printf("Press control key (QWEASDU) to start game");
-
-    while( !get_qweasdu() );
-}
-#endif
-
-
-void putline( uint8_t px, uint8_t py, uint8_t l)
-{
-    uint8_t pt1 = 0xFF>>(px&7);
-    uint8_t pt2 = 0xFF<<(px&7), c, y=py&0xF8;
-    uint16_t addr ;
-    uint8_t dl = (((l+px)&0xF8)-(px&0xF8)+7)>>3;
-//if (dl>4) dl=4;
-    for( uint8_t i=0; i<8; i++, y++)
-    {
-        addr = ytable[y]+(px>>3);
-        for( uint8_t j=0; j<=dl; j++, addr++)
-            *(unsigned char*)(addr) = 0;
-    }
-    addr = ytable[py]+(px>>3);
-    c = 0xFF>>(px&7);
-    if (l<7-(px&7)) c&=(~1<<( 7-(px&7)-l ));
-    *(unsigned char*)(addr) = c;      addr++;
-    if (dl)
-    for( uint8_t j=0; j<dl-1; j++, addr++)
-        *(unsigned char*)(addr) = 0xFF;
-    if (dl)
-        *(unsigned char*)(addr) = 0xFF<<( 7-((l+px)&7) );
-    addr = py&0xF8; addr<<=2;
-    addr|=0x5800|(px>>3);
-    for( uint8_t i=0; i<=dl; i++, addr++)
-    {
-    c = *((unsigned char*) addr);
-    c&=0xF8; c|=0x46;
-    *((unsigned char*) addr) = c;
-    }
+      if (get_qweasdu_result==5)
+      {
+            // dump_debug();
+          while(get_qweasdu_result) { get_qweasdu(); }
+      }
 }
 
-void putline_ncu( uint8_t px, uint8_t py, uint8_t l, uint8_t last)
-{
-    uint8_t pt1 = 0xFF>>(px&7);
-    uint8_t pt2 = 0xFF<<(px&7), c, y=py&0xF8;
-    uint16_t addr ;
-    uint8_t dl = (((l+px)&0xF8)-(px&0xF8))>>3;
-    if (last)
-    for( uint8_t i=0; i<8; i++, y++)
-    {
-        if (y<py) continue;
-        addr = ytable[y]+(px>>3);
-        for( uint8_t j=0; j<=dl; j++, addr++)
-            *(unsigned char*)(addr) = 0;
-    }
-    addr = ytable[py]+(px>>3);
-    c = 0xFF>>(px&7);
-    if (l<7-(px&7)) c&=(~1<<( 7-(px&7)-l ));
-    *(unsigned char*)(addr) = c;      addr++;
-    if (dl)
-    for( uint8_t j=0; j<dl-1; j++, addr++)
-        *(unsigned char*)(addr) = 0xFF;
-    if (dl)
-        *(unsigned char*)(addr) = 0xFF<<( 7-((l+px)&7) );
-    addr = py&0xF8; addr<<=2;
-    addr|=0x5800|(px>>3);
-    for( uint8_t i=0; i<=dl; i++, addr++)
-    {
-    c = *((unsigned char*) addr);
-    c&=0xF8; c|=0x46;
-    *((unsigned char*) addr) = c;
-    }
-}
+#include "gfx_perf.c"
 
-
-void sprite( uint8_t px, uint8_t py, uint8_t s)
-{
-
-}
-
-
-uint16_t sprite_x=0x800, sprite_y=0x800;
-uint16_t fireball_x=0x800, fireball_y=0x800, fireball_vx=50, fireball_vy=0;
 
 void playfield()
 {
+    if (ghost)
+    {
     uint16_t dpx = px&0xFFF;
     uint16_t dpy = py&0xFFF;
     int8_t dir = get_qweasdu_result&128?-1:1;
@@ -971,9 +844,47 @@ void playfield()
             if (!bmap[mpos]) { bmap[mpos]=0xFF; bmap[opos]=0; sprite_y = nsprite_y; }
                 else nsprite_y = sprite_y;
     }
-    fireball_x+=fireball_vx; fireball_x &= 0xFFF;
+    }
+    if (fireball)
+    {
+        uint8_t addr = ((highbyte(fireball_y)&15)<<4)|(highbyte(fireball_x)&15);
+        fireball_x+=fireball_vx; fireball_x &= 0xFFF;
+        fireball_y+=fireball_vy; fireball_y &= 0xFFF;
+        if ( bmap[ addr ] ) 
+        {
+            fireball=0;
+            if (bmap[addr]==0xFF) {
+                ghost=0;
+                printf("%c%c%c Ghost killed!              ", 22, 32+23, 32);
+                printf("%c%c%c KABOOM! KABOOM! KABOOM! KABOOM! KABOOM! KABOOM!", 22, 32+12, 32);
+                gkill_addr=addr; gkill=250;
+                bmap[ addr ]=0x42;
+            }
+            else
+            bmap[ addr ]++;
+        }
+    }
+    if (gkill) { --gkill; bmap[gkill_addr]=gkill&1?0x42+gkill:0; memset( Ybuf_co, 0xFF, 32 ); 
+        if (!gkill)
+                printf("%c%c%c You've killed a ghost my HERO!!!! Love ya!    ", 22, 32+12, 32);
+    }
+
+    if ((get_qweasdu_result&128)&&!fireball)// && ((old_player_k&128)==0))
+    {
+        fireball_x = px;
+        fireball_y = py;
+        fireball_vx = sin_table[pa]/4;
+        fireball_vy = -sin_table[(pa+64)&0xFF]/4;
+        fireball = 1;
+    }
+    
+//    cnt+=1;
+//    fireball_x = 2*sin_table[ cnt & 0xFF ] + 0xA00;
+//    fireball_y = 2*sin_table[ (cnt+64) & 0xFF ] + 0x800;
 }
 
+
+#if 0
 void dump_debug()
 {
 printf("%c%c%c O_ LEN XL _XH CTG AN  DT TAN D_H LAN L__	\n",22,32+5,32);
@@ -988,6 +899,7 @@ printf("%c%c%c O_ LEN XL _XH CTG AN  DT TAN D_H LAN L__	\n",22,32+5,32);
 printf("IXH=>  -L__");
    while( !(get_qweasdu()&0x64) );
 }
+#endif
 
 void game_init()
 {
@@ -995,6 +907,19 @@ void game_init()
 
     /* Maps distance to column heigth.  column_height = d_table[ distance>>5 ]; */
     p = d_table;
+
+#ifdef DO_LARGE_DIST
+    for( uint16_t d = 0; d<2048; d++) 
+    {
+        uint16_t n = 65535;
+        if (d<10) n=65535; else
+        n/=d; n>>=3;
+        if (n<1) n=1;
+        if (n>80) n=80;
+//        if (n>120) n=120;
+        *(p++) = n;
+    }
+#else
     for( uint16_t d = 0; d<512; d++) 
     {
         uint16_t n = 65535;
@@ -1003,6 +928,7 @@ void game_init()
         if (n>80) n=80;
         *(p++) = n;
     }
+#endif
 
     /* Create Yable lookup */
     for( i=0; i<192; i++)
@@ -1024,10 +950,42 @@ void game_init()
             py = yy;
         }
     }
-    memcpy( bmap, bmap2, 256);
+
+#ifdef DO_LUT_TAN_MUL
+    {
+    uint8_t *p = fmul_table;
+    for( i=0; i<34; i++)
+    {
+        uint8_t tg = ctan_tan_table[ 2*i ];
+        for( y=0; y<128; y++) 
+        {
+             *p = mul8( tg, (y<<1));
+             p++;
+        }
+    }
+    }
+#endif
+
+#ifdef DO_LUT_CTAN_MUL 
+    {
+    uint16_t *p = fmul_ctan_table;
+    for( i=0; i<34; i++)
+    {
+        uint8_t tg = ctan_tan_table[ 2*i+1 ];
+        for( y=0; y<128; y++) 
+        {
+             *p = mul8all( tg, (y<<1));
+             p++;
+        }
+    }
+    }
+#endif
+
+
+    mmemcpy( bmap, bmap2, 256);
     set_interrupt();
     player_rotation_v=-15;
-    player_vy = 500;
+    player_vy = 120;
 }
 
 
@@ -1055,11 +1013,11 @@ void hud_display()
     ld b, a
     ld c, a
     or a
-    jz skip_loop0
+    jr z, skip_loop0
     ld a, 0x3A
 repeat_color:
     ld (hl), a
-    inc hl
+    inc l
     djnz repeat_color
 skip_loop0:
     ld a, c
@@ -1067,11 +1025,11 @@ skip_loop0:
     neg
     ld b, a
     or a
-    jz skip_loop1
+    jr z, skip_loop1
     ld A, 0x3F
 repeat_color2:
     ld (hl), a
-    inc hl
+    inc l
     djnz repeat_color2
 skip_loop1:
 #endasm
@@ -1081,35 +1039,127 @@ skip_loop1:
 #endif
 }
 
-main()
+uint8_t mrp;
+
+void draw_enemies()
+{
+    if (fireball) 
+    {
+    int16_t dpx = px&0xFFF;
+    int16_t dpy = py&0xFFF;
+    uint8_t min_x, max_x;
+    dpx-=fireball_x; dpy-=fireball_y;
+    atan_x = dpx;  atan_y = dpy;
+    uint8_t angle= int_atan2();;
+
+    angle = -angle-pa+32;     
+    if (angle<64)
+    {
+
+
+//                     for ( uint8_t n=0; n<o_index; n+=2)
+//                       if ((angle&0xFE)==(o_table[n]<<1)) {          
+         uint8_t height = d_table[ div16y>>3 ];
+         uint8_t h12 = height>>4,  h2=height>>1;
+         uint8_t x = (angle<<2) | (3-(atan_rest));
+//	         height=100;
+//         height=100+h12+(height&8?1:0);
+         height+=92-h12-h12;
+
+         if (x>255-2*h12) return;
+         putline( x, height, h12);
+
+         for( uint8_t opos=0; opos<h12; opos++, height++)
+             if (height<184) putline_ncu( x-(opos>>1), height, h12+opos, 0);
+         if (height<184)
+         for( uint8_t opos=h12; opos>0; opos--, height++)
+             if (height<184) putline_ncu( x-(opos>>1), height, h12+opos, 0);
+             if (height<184) putline_ncu( x, height, h12, 1);
+         min_x = (x-(h12>>1))>>3;
+         max_x = (x+2*h12)>>3;
+         for(; min_x<=max_x; min_x++)
+            Ybuf_co[min_x]=0xFF;
+//                     }
+        }
+    }
+    if (ghost)
+    {
+        int16_t dpx = px&0xFFF;
+        int16_t dpy = py&0xFFF;
+        dpx-=sprite_x; dpy-=sprite_y;
+        atan_x = dpx;  atan_y = dpy;
+        uint8_t angle= int_atan2();;
+
+        angle = -angle-pa+32;     
+        if (angle<64)
+        {
+            uint8_t min_x, max_x;
+            for ( uint8_t n=0; n<o_index; n+=2)
+               if ((angle&0xFE)==(o_table[n]<<1)) {          
+                   uint8_t height = d_table[ div16y>>3 ];
+                   uint8_t h12 = height>>3,  h2=height>>1;
+                   uint8_t x = (angle<<2) | (3-(atan_raw&3));
+                   putline( x, 100, h2);
+                   putline( x+(height>>3), 96+h2, height>>2);
+                   putline( x, 96+height, h2);
+                   height+=96;
+                   for( uint8_t opos=0; opos<h12; opos++, height++)
+                       if (height<184)putline_ncu( x-(opos>>1), height, h2+opos, 0);
+                   if (height<184)
+                   for( uint8_t opos=h12; opos>0; opos--, height++)
+                       if (height<184) putline_ncu( x-(opos>>1), height, h2+opos, 0);
+                   min_x = (x-(h12>>1))>>3;
+                   max_x = (x+h2)>>3;
+
+            for(; min_x<=max_x; min_x++)
+              Ybuf_co[min_x]=0xFF;
+                   break;
+               }
+        }
+    }
+
+}
+
+void main()
 {
     char update = 1;
 
     game_init();
     tick=1 ;
 
+//atan_test();
+#ifdef USE_STDLIB
     clg();   
+#endif
 
-#ifdef DO_PERF_FEST_AT_STARTUP
+#ifdef DO_PERF_TEST_AT_STARTUP
     perf_test();
 #endif
 
     uint16_t start, end;
+
+#ifdef USE_STDLIB
     printf("Find the black box.             Movement: WSAD + QE\n");
     printf("Speed|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||");
-    printf("%c%c%cBLACK BOX IS A FINAL DESTINATION! BLACK BOX IS A FINAL DESTINATION!", 22, 32+12, 32);
+    printf("%c%c%cBLACK & BLUE BOX IS A FINAL DESTINATION! BLACK & BLUE BOX!", 22, 32+12, 32);
     printf("%c%c%c Fast raycasting engine tech demo.   C2025 JTKrakow ", 22, 32+23, 32);
+#endif
     start = btime = get_clock();
 
     while(1)
     {
-        player();
-        if (player_vx||player_vy||player_rotation_v) update=1;
+        get_qweasdu();
 
-        else if ((render_mode==1)||(render_mode==2)) update=1;
-//update=1; pa++;
-        if (update) {
-          
+#ifdef DO_PERF_TEST
+        if (get_qweasdu_result==0xC0)
+        {
+            get_qweasdu_result=0;   perf_test();    continue;
+        }
+#endif
+        player();
+        update = player_vx||player_vy||player_rotation_v;
+        if (update||render_mode) 
+        {          
            switch (render_mode)
            {
                default:render_mode = 0;
@@ -1123,9 +1173,15 @@ main()
                break;
 
                case 1:
-                   playfield();
+                   if (ghost||fireball||gkill) playfield();
                    raycast2(); 
-                   if (o_index) renderv_full(); else renderv();     
+#ifdef DO_SND
+                    if (get_qweasdu_result&128) snd();
+#endif
+
+                   renderv();     
+                   if (ghost||fireball) draw_enemies();
+                   hud_display();
 #if 0
                    for ( uint8_t n=0; n<o_index; n+=2) 
                    {
@@ -1133,8 +1189,9 @@ main()
                        printf("%c%c%c++", 22, 32+12, 32+2*o_table[n]);
                    }
 #endif             
-                   hud_display();
-                   if (o_index)
+
+#if 0
+//                   if (o_index)
                    {
                        int16_t dpx = px&0xFFF;
                        int16_t dpy = py&0xFFF;
@@ -1147,7 +1204,7 @@ main()
                           for ( uint8_t n=0; n<o_index; n+=2)
                               if ((angle&0xFE)==(o_table[n]<<1)) {          
                                   uint8_t height = d_table[ div16y>>3 ];
-                                  uint8_t h12 = height>>3,  h2=height>>1;
+                                  uint8_t h12 = height>>3,  h2=height>>3;
                                   uint8_t x = (angle<<2) | (3-(atan_raw&3));
                                   putline( x, 100, h2);
                                   putline( x+(height>>3), 96+h2, height>>2);
@@ -1163,70 +1220,14 @@ main()
                                Ybuf_co[ o_table[n] ] = 0xFE;
                        }
                    }
-                   
+#endif                   
               break;
 //              
               case 2: 
                    playfield();
+                   player();
                    raycast2(); bwrender3();     hud_display();
-#if 1
-                   if (o_index)
-                   {
-                       int16_t dpx = px&0xFFF;
-                       int16_t dpy = py&0xFFF;
-                       dpx-=sprite_x; dpy-=sprite_y;
-                       atan_x = dpx;  atan_y = dpy;
-                       uint8_t angle= int_atan2();;
-
-                       angle = -angle-pa+32;     
-                       if (angle<64)
-                       {
-                          for ( uint8_t n=0; n<o_index; n+=2)
-                              if ((angle&0xFE)==(o_table[n]<<1)) {          
-                                  uint8_t height = d_table[ div16y>>3 ];
-                                  uint8_t h12 = height>>3,  h2=height>>1;
-                                  uint8_t x = (angle<<2) | (3-(atan_raw&3));
-                                  putline( x, 100, h2);
-                                  putline( x+(height>>3), 96+h2, height>>2);
-                                  putline( x, 96+height, h2);
-                                  height+=96;
-                                  for( uint8_t opos=0; opos<h12; opos++, height++)
-                                      if (height<184)putline_ncu( x-(opos>>1), height, h2+opos, 0);
-                                  if (height<184)
-                                  for( uint8_t opos=h12; opos>0; opos--, height++)
-                                      if (height<184) putline_ncu( x-(opos>>1), height, h2+opos, 0);
-                                  break;
-                              }
-                       }
-                   }
-#endif
-                   if (o_index)
-                   {
-                       int16_t dpx = px&0xFFF;
-                       int16_t dpy = py&0xFFF;
-                       dpx-=fireball_x; dpy-=fireball_y;
-                       atan_x = dpx;  atan_y = dpy;
-                       uint8_t angle= int_atan2();;
-
-                       angle = -angle-pa+32;     
-                       if (angle<64)
-                       {
-                          for ( uint8_t n=0; n<o_index; n+=2)
-                              if ((angle&0xFE)==(o_table[n]<<1)) {          
-                                  uint8_t height = d_table[ div16y>>3 ];
-                                  uint8_t h12 = height>>3,  h2=height>>1;
-                                  uint8_t x = (angle<<2) | (3-(atan_raw&3));
-                                  height=100;
-                                  putline( x, height, h2);
-                                  for( uint8_t opos=0; opos<h12; opos++, height++)
-                                      if (height<184)putline_ncu( x-(opos>>1), height, h2+opos, 0);
-                                  if (height<184)
-                                  for( uint8_t opos=h12; opos>0; opos--, height++)
-                                      if (height<184) putline_ncu( x-(opos>>1), height, h2+opos, 0);
-                                  break;
-                              }
-                       }
-                   }
+                   draw_enemies();
               break;
 
 
@@ -1235,38 +1236,30 @@ main()
                   playfield(); maprender(); hud_display();
               break;
            }
-           update = 0;
 
-           if (tick++%100==0) {
+           if (++tick>100) {
+               tick=0;
                end = get_clock();
 //               printf("%c%c%c %u %u.%u  fps?", 22, 32+1-1, 32, tt, (end-start)/100, (end-start)%100);
                uint16_t fps = 50000/(end-start); start=end;
+#ifdef USE_STDLIB
                printf("%c%c%c FPS:%u.%u ", 22, 32+23, 32+54, fps/10, fps%10 );
+#endif
            }           
+#if 0
+           if ((tick==25)||(tick==50)||(tick==75)||(tick==0))
+           {
+               mrp&=15;
+               bmap[0x80|mrp]=0;
+               mrp++;
+               bmap[0x80|mrp]=1;
+           }
+#endif
         }
-//        else
+        else if (!update)
         {
-            if (get_qweasdu_result==0xC0)
-            {
-//                dump_debug();
-
-                perf_test();
-
-            }
+         //    printf("%c%c%cBLACK BOX IS A FINAL DESTINATION! BLACK BOX IS A FINAL DESTINATION!", 22, 32+12, 32);
         }
     }
 }
 
-void end_of_code()
-{
-#asm
-   nop
-   exx
-   nop
-   exx
-   nop
-   nop
-   nop
-   nop
-#endasm
-}

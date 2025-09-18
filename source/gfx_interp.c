@@ -272,9 +272,9 @@ more_than_5:
     ld hl, _m8
     ld b, 0
     sla c
-    ld a, c
-    sub 24
-    ld c, a
+//    ld a, c
+//    sub 24
+//    ld c, a
     add hl, bc
     ld (_fast_stamp_src), hl
     call _fast_stamp_8
@@ -371,7 +371,7 @@ repeat:
     ld (hl),a
     add hl,32
     dec b
-    jnz repeat
+    jr nz,repeat
 
     di
 
@@ -399,9 +399,9 @@ repeat:
      ld b, a
      ld a, (_interp_r)
      and a
-     jz lll1
+     jr z, lll1
      ld a, 0x17
-     jmp lll2
+     jp lll2
 lll1:
      ld a, 0x1F
 lll2:
@@ -455,7 +455,7 @@ loop0:
      ld a, (hl)  
      inc hl
      and a
-     jz end_loop1
+     jr z, end_loop1
      exx
      ld d, a      // ixh = *(it++);
      ld a, e
@@ -464,7 +464,7 @@ loop1_cont:     // DE: ytable pointer.  A: color. IXH: loop cnt BC: offset_x, HL
      add hl, bc // 11        
      ld (hl),a  // 7   ytable[de]+interp_x = a
      dec d      // 4
-     jnz loop1_cont // 12/7
+     jr nz,loop1_cont // 12/7
      exx
 end_loop1:
      ld a, b
@@ -476,7 +476,7 @@ do_sr:
      dec c
      exx
      ld e,a
-     jnz loop0
+     jr nz,loop0
 
      ld  hl, (_tmpsp)
      ld  sp, hl

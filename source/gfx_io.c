@@ -1,5 +1,3 @@
-#include <im2.h>
-
 uint8_t get_qweasdu_result;
 uint8_t get_qweasdu()
 {       
@@ -13,7 +11,7 @@ uint8_t get_qweasdu()
 
 get_keys_qweasdu:
     push bc
-    ld   c, $FE          ; ULA keyboard port
+    ld   c, 0xFE          ; ULA keyboard port
     ld   e, 0            ; E = result accumulator
 
     ; --- Row 2 (A10 low): Q W E R T -> want Q,W,E in bits 0..2
@@ -74,15 +72,35 @@ interrupt_handler:
 #endasm
 }
 
+#ifndef USE_STDLIB
+void bpoke( uint16_t addr, uint8_t value)  {     *((char*)addr) = value;  }
+void wpoke( uint16_t addr, uint16_t value) {     *((uint16_t*)addr) = value;  }
+
+
+void im2_Init()
+{
+#asm
+    ld a,INTMAP_ADDR/256
+    ld i, a
+    im 2
+    ret
+#endasm
+}
+#endif
+
 void set_interrupt()
 {
-    memset(INTMAP_ADDR, INTMAP_ROUTINE_SEG, 257);     // initialize 257-byte im2 vector table with all same bytes
+    memset((void*)INTMAP_ADDR, INTMAP_ROUTINE_SEG, 257);     // initialize 257-byte im2 vector table with all same bytes
     bpoke(INTMAP_ROUTINE_ADDR, 195);                  // POKE jump instruction (interrupt service routine entry)
-    wpoke(INTMAP_ROUTINE_ADDR+1, interrupt_handler);  // POKE isr address following the jump instruction
+    wpoke(INTMAP_ROUTINE_ADDR+1, (uint16_t) interrupt_handler);  // POKE isr address following the jump instruction
 #asm
     di
 #endasm
+#ifdef USE_STDLIB
     im2_Init(INTMAP_ADDR);                            // place z80 in im2 mode with interrupt vector table 
+#else
+    im2_Init();
+#endif
 #asm
     ei
 #endasm

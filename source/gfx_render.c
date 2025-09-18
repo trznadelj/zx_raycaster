@@ -1,6 +1,5 @@
 uint8_t vline_x, vline_d, vline_db, vline_c, vline_c2;
 
-
 void vline()
 {
 #asm
@@ -27,7 +26,7 @@ a2hl_plusde_8times:  // fastest possible fillout, right?
     inc h
     ld (hl), a
     inc h
-    cpl//xor a,0xFF
+    cpl
     ret
 #endasm
 }
@@ -37,6 +36,7 @@ a2hl_plusde_8times:  // fastest possible fillout, right?
 void vline3()
 {
 #asm
+    /* In case call from C code will happen... */
     ld a, (_vline_d)
     ld iyh, a
     ld a, (_vline_x)
@@ -45,8 +45,12 @@ void vline3()
     ld c,a
 
 vline3_start:
+    /* iyh: column height */
+    /* iyl: x             */
+    /*   c: color         */
+
     /*** set return to vline_r5 ***/
-    ld hl, vline3_r5
+    ld hl, vline3_r5_no_b_set
     push hl
 
     /*** Calculate number of filled ones 0...80 transaltes to 0...10, multiplied by 64 */
@@ -75,13 +79,14 @@ vline3_start:
 
     /*** Calculate colors. C does contain main color */
     ld a, c
-    ld ixh, a // bottom edge. black background.
+    and 0xC7
+    ld ixh, a         // bottom edge. black background.
     or 0x38
-    ld ixl,  a // top edge. black background.
+    ld ixl, a         // top edge. white background.
     ld a, c
-    rla
-    rla
-    rla
+    add a,a
+    add a,a
+    add a,a
     or c
     ld c, a           // middle in c: color replicated
     ld a, c
@@ -89,6 +94,8 @@ vline3_start:
     ld b, 0           // bottom in b: black
     ret
 vline3_r5:
+    ld  b, 0
+vline3_r5_no_b_set:
     /*** Calculate fillout length ***/
     ld a,iyh //(_vline_d)  // c=(MIDDLE_LINE-vline_d)&7
     sub MIDDLE_LINE
@@ -97,55 +104,86 @@ vline3_r5:
     and 7
 
     /*** Calculate function address. filler0 + 18*a ***/
-    ld d, a
-    // a*=20
-    rla
-    and 0xFC
-    ld c, a
-    rla
-    rla
-    rla
-    and 0xF0
-    add c
-    ld c, a
-    ld b, 0
-    ld hl, filler0
-    add hl, bc
-    push hl
+    ld  d, a       // 4
+    // a*=18
+    add a, a       // 4
+    ld  c, a       // 4
+    add a, a       // 4
+    add a, a       // 4
+    add a, a       // 4
+    add c          // 4
+    ld  c, a       // 4
 
-    // p = 18*7-18*a = 126 - 18*a
-    ld a, 126
-    sub c
-    ld c, a
-    ld hl, filler0
-    add hl, bc
-    push hl
+    ld  hl, filler0 // 10
+    add hl, bc      // 11
+    push hl         // 10
+   
+    ld  a, 126      // 7T p = 18*7-18*a = 126 - 18*a
+    sub c           // 4
+    ld  c, a        // 4
+    ld  hl, filler0 // 10
+    add hl, bc      // 11
+    push hl         // 10 => 40 + 62 = 102
 
+/*  ld h, frollseg  7
+    add a,a         4
+    add a,a         4
+    ld l, a         4
+    ld e, (hl)      7
+    inc l           4  - 30
+    ld d, (hl)      7
+    push de         10
+    inc l           4
+    ld e, (hl)      7
+    inc l           4
+    ld d, (hl)      7
+    push de         10  => 79
+ */
     /*** Y calculation ***/
-    ld   c, iyl //(_vline_x)
-    ld   a, e
-    add  a, 8
-    rra                   
-    rra
-    and 0x3E
-//ld b, a
-    add YTABLE_REV_OFFSET
-    ld h, YTABLE_REV_SEG
-    ld l, a
-    ld a, (hl)
-    add c
-    ld e, a
-    inc l 
-    ld d, (hl)
+
+/*
+   Height table.
+   ld a, iyh            8
+   add a,a              4
+   ld h, VLINE_Y_SEG/2  7
+   rla                  4
+   rl h                 8 -- 31
+   ld l, a              4
+   ld a, iyl            8
+   ld d, (hl)           7
+   inc hl               4
+   add (hl)             7 -- 30
+   ld e, a              4
+   inc hl               4
+   ld b, (hl)           8
+   inc hl               4 -- 20
+   ld a, iyl            8
+   add (hl)             7
+   ld l, a              4
+   ld h, b              4 -- 23 => 104 cycles vs 
+ */
+
+    ld   c, iyl     // 8 T //(_vline_x)
+    ld   a, e       // 4
+    add  a, 8       // 7
+    rra             // 4      
+    rra             // 4
+    and  0x3E       // 7       // a = ((MIDDLE_LINE-vline_x+8)>>2)&0x3E
+    add   YTABLE_REV_OFFSET // 7
+    ld h, YTABLE_REV_SEG    // 7
+    ld l, a         // 4
+    ld a, (hl)      // 7
+    add c           // 4
+    ld e, a         // 4
+    inc l           // 4
+    ld d, (hl)      // 7 => 52+26 => 78*2 = 152 cycles.       // DE = ytable[ a ]
 
 
     ld a,iyh // (_vline_d)          
     add MIDDLE_LINE+9//1
     rra                   
     rra
-    and 0x3E
-//ld a, 46
-//sub b
+    and 0x3E               // a = ((MIDDLE_LINE+vline_x+9)>>2)&0x3E
     add YTABLE_REV_OFFSET
     ld l, a
     ld a, (hl)
@@ -600,7 +638,7 @@ filler8:
 }
 
 
-void renderv_full()
+void renderv_full_C()
 {
     for( uint8_t x=0; x<32; x++)
     {
@@ -613,6 +651,37 @@ void renderv_full()
         Ybuf_co[x] = vline_c;
         vline3();
     }
+}
+
+
+void renderv_full()
+{
+// uint8_t Ybuf[32], Ybuf_c[32], Ybuf_i[32], Ybuf_s[32], Ybuf_o[32], Ybuf_co[32];;
+#asm
+    xor a
+    ld iyl, a
+    ld h, YBUF_SEG
+renderv_full_loop:
+    ld l, a
+    ld b, (hl)                 // hl: 0x00;  b = Ybuf[iyl] - height
+    set 5, l
+    ld c, (hl)                 // hl: 0x20;  c = Ybuf_c[iyl] - color
+    res 5, l
+    set 7, l
+    ld a, (hl)                 // hl: 0x80;  a = Ybuf_o[iyl]
+    cp b                       // b: Ybuf == Ybuf_o ?
+    set 5, l
+    ld a, (hl)                 // hl: 0xA0;  
+    ld (hl), c                 // Ybuf_co = c: current color
+    ld iyh, b
+    call vline3_start
+    ld h, YBUF_SEG
+    inc iyl                    // repeating loop preamble -> we save on one jump
+    ld a, iyl
+    cp 32
+    jr c, renderv_full_loop
+    ret
+#endasm
 }
 
 
@@ -631,42 +700,51 @@ renderv_loop:
     ret nc
 renderv_loop_inside:
     ld l, a
-    ld b, (hl)
+    ld b, (hl)                 // hl: 0x00;  b = Ybuf[iyl] - height
     set 5, l
-    ld c, (hl)                  // hl: 0x20
+    ld c, (hl)                 // hl: 0x20;  c = Ybuf_c[iyl] - color
     res 5, l
     set 7, l
-    ld a, (hl)
-    cp b                       // b: Ybuf, a: Ybuf_o
+    ld a, (hl)                 // hl: 0x80;  a = Ybuf_o[iyl]
+    cp b                       // b: Ybuf == Ybuf_o ?
     jr nz,call_vline_no_color  // changed length, unsure about color
     set 5, l
-    ld a, (hl)
+    ld a, (hl)                 // hl: 0xA0;  
     cp c
     jr z,renderv_loop          // if color not changed as well (likely!) - repeat.
 call_vline:
     ld (hl), c                 // Ybuf_co = c: current color
     ld iyh, b
+    //    dec c                // uncomment for black walls
     call vline3_start
     ld h, YBUF_SEG
-    jp renderv_loop
+    inc iyl                    // repeating loop preamble -> we save on one jump
+    ld a, iyl
+    cp 32
+    jr c, renderv_loop_inside
+    ret
 call_vline_no_color:
-    ld (hl), b
-    set 5, l
+    ld (hl), b                 // Ybuf_o[iyl] = Ybuf[iyl]
+    set 5, l                   // hl: 0xA0
 
     add 4
     ld d, a
     ld a, b
     add 4
     xor d
-    and 0xF8 // check if more significant bits were changed
-    jr nz,call_vline
+    and 0xF8                   // check if more significant bits were changed
+    jr nz,call_vline           // big change in length - call vline
 
     ld a, (hl)
     cp c
-    jr nz,call_vline
+    jr nz,call_vline           // color change, small change in height
     ld iyh, b
-    call vline3_r5
+    call vline3_r5             // just small change in height within 8x8 area
     ld h, YBUF_SEG
-    jp renderv_loop
+    inc iyl                    // repeating loop preamble -> we save on one jump
+    ld a, iyl
+    cp 32
+    jr c, renderv_loop_inside
+    ret
 #endasm
 }

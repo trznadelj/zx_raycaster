@@ -5,5 +5,4 @@ To compile:
 
 Not everything is cleaned up, sorry for that.
 
-
-python correlate.py --base 0 --include-token code_compiler gfx.map profile_from_fuse
+See gameplay: https://www.youtube.com/watch?v=Xc_FXYxDReg
